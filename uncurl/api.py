@@ -3,13 +3,12 @@ import argparse
 import json
 import re
 import shlex
+import requests
 from collections import OrderedDict, namedtuple
 
 from six.moves import http_cookies as Cookie
 
 parser = argparse.ArgumentParser()
-parser.add_argument('command')
-parser.add_argument('url')
 parser.add_argument('-d', '--data')
 parser.add_argument('-b', '--data-binary', '--data-raw', default=None)
 parser.add_argument('-X', default='')
@@ -21,10 +20,68 @@ parser.add_argument('-i','--include', action='store_true')
 parser.add_argument('-s','--silent', action='store_true')
 parser.add_argument('-x', '--proxy', default={})
 parser.add_argument('-U', '--proxy-user', default='')
+parser.add_argument('--http', action='store_true')
+pre_parse = parser.parse_known_args()
+p = argparse.ArgumentParser()
+parser.add_argument('command', required=not pre_parse.http)
+parser.add_argument('url', required=not pre_parse.http)
+parser.add_argument('req', required=pre_parse.http)
 
 BASE_INDENT = " " * 4
 
-ParsedContext = namedtuple('ParsedContext', ['method', 'url', 'data', 'headers', 'cookies', 'verify', 'auth', 'proxy'])
+ParsedContext = namedtuple('ParsedContext', ['method', 'url', 'data', 'headers', 'cookies', 'verify', 'auth', 'proxy', 'http'])
+
+CRLF = '\r\n'
+
+DEFAULT_HTTP_VERSION = 'HTTP/1.1'
+
+
+class RequestParser(object):
+    def __parse_request_line(self, request_line):
+        request_parts = request_line.split(' ')
+        self.method = request_parts[0]
+        self.url = request_parts[1]
+        self.protocol = request_parts[2] if len(request_parts) > 2 else DEFAULT_HTTP_VERSION
+
+    def __init__(self, req_text):
+        req_lines = req_text.split(CRLF)
+        self.__parse_request_line(req_lines[0])
+        ind = 1
+        self.headers = dict()
+        while ind < len(req_lines) and len(req_lines[ind]) > 0:
+            colon_ind = req_lines[ind].find(':')
+            header_key = req_lines[ind][:colon_ind]
+            header_value = req_lines[ind][colon_ind + 1:]
+            self.headers[header_key] = header_value
+            ind += 1
+        ind += 1
+        self.data = req_lines[ind:] if ind < len(req_lines) else None
+        self.body = CRLF.join(self.data)
+
+    def __str__(self):
+        headers = CRLF.join(f'{key}: {self.headers[key]}' for key in self.headers)
+        return f'{self.method} {self.url} {self.protocol}{CRLF}' \
+               f'{headers}{CRLF}{CRLF}{self.body}'
+
+    def to_request(self):
+        req = requests.Request(method=self.method,
+                               url=self.url,
+                               headers=self.headers,
+                               data=self.data, )
+        return req
+
+
+if __name__ == '__main__':
+    r = RequestParser('''POST https://httpbin.org/post\r
+Content-Type: application/json\r
+\r
+{\r
+  "id": 999,\r
+  "value": "content"\r
+}''')
+    print(r)
+    req = r.to_request()
+    print(r)
 
 
 def normalize_newlines(multiline_text):
@@ -137,3 +194,8 @@ def dict_to_pretty_string(the_dict, indent=4):
     return ("\n" + " " * indent).join(
         json.dumps(the_dict, sort_keys=True, indent=indent, separators=(',', ': ')).splitlines())
 
+
+def parse_http_request(httpreq):
+    parsed = parser.parse_args()
+    if parsed.http:
+        RequestParser(httpreq)

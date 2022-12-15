@@ -1,0 +1,36 @@
+const request = require("request");
+
+// headers
+headers = {
+{%- for header_name, header_value in headers.items() %}
+  '{{ header_name.replace("'","\\'") }}': '{{ header_value.replace("'","\\'") }}',
+{%- endfor %}
+}
+
+// cookies
+var jar = request.jar();
+{%- for cookie_name, cookie_value in cookies.items() %}
+{%- set cookie_name = cookie_name.replace("'","\\'") %}
+{%- set cookie_value = cookie_value.replace("'","\\'") %}
+jar.add(request.cookie('{{ cookie_name }}={{ cookie_value }}'));
+{%- endfor %}
+
+// data
+{%- if data != None %}
+var data = `{{ data.replace("`","\\`") }}`;
+{%- else %}
+var data = null;
+{%- endif %}
+
+// prepare and send request
+request({
+  uri: '{{ scheme }}://{{ host }}:{{ port }}{{ uri }}',
+  method: '{{ method }}',
+  headers: headers,
+  body: data,
+  jar: jar,
+}, function(error, response, body) {
+  // console.log(response.status_code);
+  // console.log(body);
+  // console.log(response.headers)
+});
